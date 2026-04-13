@@ -162,6 +162,22 @@ p.body-text{font-size:15px;font-weight:300;line-height:1.9;color:var(--soft);max
 .reveal.visible{opacity:1;transform:translateY(0);}
 .rd1{transition-delay:0.1s;}.rd2{transition-delay:0.25s;}.rd3{transition-delay:0.4s;}.rd4{transition-delay:0.55s;}
 hr.gem-line{border:none;height:1px;width:60px;margin:28px auto;background:linear-gradient(90deg,transparent,rgba(201,169,110,0.4),transparent);}
+
+/* ══ REPLY ══ */
+.reply-toggle{background:none;border:none;color:var(--soft);font-size:10px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;padding:6px 0 0;font-family:'Jost',sans-serif;transition:color 0.3s;}
+.reply-toggle:hover{color:var(--crystal2);}
+.reply-box{display:none;margin-top:12px;padding-top:12px;border-top:1px solid rgba(168,200,248,0.08);}
+.reply-box.open{display:block;}
+.reply-input-row{display:flex;gap:8px;margin-bottom:10px;}
+.reply-input-row input{flex:1;padding:8px 12px;background:rgba(168,200,248,0.06);border:1px solid rgba(168,200,248,0.15);border-radius:8px;color:var(--white);font-family:'Jost',sans-serif;font-size:12px;font-weight:300;outline:none;}
+.reply-input-row input::placeholder{color:rgba(136,152,204,0.5);}
+.reply-send{padding:8px 14px;background:rgba(168,200,248,0.1);border:1px solid rgba(168,200,248,0.25);border-radius:8px;color:var(--crystal2);font-size:10px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;font-family:'Jost',sans-serif;white-space:nowrap;transition:all 0.3s;}
+.reply-send:hover{background:rgba(168,200,248,0.2);color:var(--white);}
+.reply-list{display:flex;flex-direction:column;gap:8px;}
+.reply-item{background:rgba(168,200,248,0.04);border-left:2px solid rgba(168,200,248,0.2);border-radius:0 8px 8px 0;padding:8px 12px;}
+.reply-name{font-family:'Cormorant Garamond',serif;font-size:13px;color:var(--crystal2);margin-bottom:2px;}
+.reply-msg{font-size:12px;color:var(--soft);font-style:italic;line-height:1.6;}
+.reply-time{font-size:9px;color:rgba(136,152,204,0.35);margin-top:4px;letter-spacing:1px;}
 .flower-row{display:flex;justify-content:center;align-items:center;gap:12px;margin:20px 0;}
 .flower-row svg{width:28px;height:28px;opacity:0.7;}
 @media(max-width:500px){.couple-grid{grid-template-columns:1fr;}.couple-amp{display:none;}}
@@ -471,6 +487,7 @@ const FB_URL = 'https://pernikahan-nadla-taher-default-rtdb.asia-southeast1.fire
 let lastWishCount = -1;
 
 async function saveWish(entry) {
+  entry.id = 'w' + entry.ts; // tambah id unik
   await fetch(FB_URL + '/wishes.json', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -496,14 +513,70 @@ async function renderWishes(isFirst=false) {
     noW.style.display = 'none';
     list.innerHTML = '';
     [...wishes].reverse().forEach(w => {
+      const wishId = w.id || ('w' + w.ts);
       const d = document.createElement('div');
       d.className = 'wish-item';
       const att = w.attend === 'Hadir'
         ? '<span style="color:var(--crystal2);">✦ Hadir</span>'
         : '<span style="color:var(--soft);">✦ Tidak Hadir</span>';
-      d.innerHTML = `<p class="wish-name">${w.name}</p><p class="wish-attend">${att}</p><p class="wish-msg">"${w.wish||''}"</p><p class="wish-time">${w.time||''}</p>`;
+      const replies = w.replies ? Object.values(w.replies).sort((a,b)=>(a.ts||0)-(b.ts||0)) : [];
+      const repliesHtml = replies.map(r => `
+        <div class="reply-item">
+          <p class="reply-name">${r.name}</p>
+          <p class="reply-msg">${r.msg}</p>
+          <p class="reply-time">${r.time}</p>
+        </div>`).join('');
+      d.innerHTML = `
+        <p class="wish-name">${w.name}</p>
+        <p class="wish-attend">${att}</p>
+        <p class="wish-msg">"${w.wish||''}"</p>
+        <p class="wish-time">${w.time||''}</p>
+        <button class="reply-toggle" onclick="toggleReply('${wishId}')">✦ Balas</button>
+        <div class="reply-box" id="rb-${wishId}">
+          <div class="reply-input-row">
+            <input type="text" placeholder="Nama kamu" id="rn-${wishId}"/>
+            <input type="text" placeholder="Tulis balasan..." id="rm-${wishId}" style="flex:2;"/>
+            <button class="reply-send" onclick="sendReply('${wishId}')">Kirim</button>
+          </div>
+          <div class="reply-list" id="rl-${wishId}">${repliesHtml}</div>
+        </div>`;
       list.appendChild(d);
     });
+  } catch(e) {}
+}
+
+function toggleReply(wishId) {
+  const box = document.getElementById('rb-' + wishId);
+  box.classList.toggle('open');
+}
+
+async function sendReply(wishId) {
+  const nameEl = document.getElementById('rn-' + wishId);
+  const msgEl  = document.getElementById('rm-' + wishId);
+  const name = nameEl.value.trim();
+  const msg  = msgEl.value.trim();
+  if (!name || !msg) return;
+  const now  = new Date();
+  const time = now.toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'}) + ', ' + now.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});
+  try {
+    const res = await fetch(FB_URL + '/wishes.json?nc=' + Date.now());
+    const raw = await res.json();
+    let fbKey = null;
+    Object.entries(raw).forEach(([k,v]) => {
+      if (v && (v.id === wishId || 'w'+String(v.ts) === wishId)) fbKey = k;
+    });
+    if (!fbKey) return;
+    await fetch(FB_URL + '/wishes/' + fbKey + '/replies.json', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name, msg, time, ts: Date.now()})
+    });
+    nameEl.value = ''; msgEl.value = '';
+    const rl = document.getElementById('rl-' + wishId);
+    const rd = document.createElement('div');
+    rd.className = 'reply-item';
+    rd.innerHTML = `<p class="reply-name">${name}</p><p class="reply-msg">${msg}</p><p class="reply-time">${time}</p>`;
+    rl.appendChild(rd);
   } catch(e) {}
 }
 
